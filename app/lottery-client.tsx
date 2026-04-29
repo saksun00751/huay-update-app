@@ -68,17 +68,27 @@ interface MarketDetailResponse {
 }
 
 /* ─── Group meta — keyed by group_code ─── */
-const GROUP_META: Record<string, { icon: React.ReactNode; color: string; cls: string }> = {
-  'lotto-thai':          { icon: <Flag size={13} />,       color: '#d4af37', cls: 'gt-thai' },
-  'lotto-international': { icon: <Globe size={13} />,      color: '#60a5fa', cls: 'gt-foreign' },
-  'lotto-stock':         { icon: <TrendingUp size={13} />,  color: '#4ade80', cls: 'gt-stock' },
-  'lotto-daily':         { icon: <Clock size={13} />,       color: '#a78bfa', cls: 'gt-daily' },
+const GROUP_META: Record<string, { icon: React.ReactNode; color: string; highlight: string; cls: string }> = {
+  'lotto-thai':          { icon: <Flag size={13} />,       color: '#d4af37', highlight: '#f5d060', cls: 'gt-thai' },
+  'lotto-foreign':       { icon: <Globe size={13} />,      color: '#60a5fa', highlight: '#93c5fd', cls: 'gt-foreign' },
+  'lotto-stock':         { icon: <TrendingUp size={13} />,  color: '#4ade80', highlight: '#86efac', cls: 'gt-stock' },
+  'lotto-daily':         { icon: <Clock size={13} />,       color: '#a78bfa', highlight: '#c4b5fd', cls: 'gt-daily' },
 }
-const FALLBACK_META = { icon: <LayoutGrid size={13} />, color: '#d4af37', cls: 'gt-thai' }
+const FALLBACK_META = { icon: <LayoutGrid size={13} />, color: '#d4af37', highlight: '#f5d060', cls: 'gt-thai' }
 const metaFor = (code: string) => GROUP_META[code] ?? FALLBACK_META
+
+/* per-group highlight palettes — cycle through these per market card */
+const GROUP_PALETTE: Record<string, string[]> = {
+  'lotto-thai':    ['#f5d060', '#f0c14b', '#e8b923', '#d4af37', '#c9a227'],
+  'lotto-foreign': ['#93c5fd', '#7dd3fc', '#67e8f9', '#5eead4', '#a5b4fc'],
+  'lotto-stock':   ['#86efac', '#6ee7b7', '#4ade80', '#34d399', '#a7f3d0'],
+  'lotto-daily':   ['#c4b5fd'],
+}
+const FALLBACK_PALETTE = ['#f5d060']
+const paletteFor = (code: string) => GROUP_PALETTE[code] ?? FALLBACK_PALETTE
 const GROUP_EMOJI: Record<string, string> = {
   'lotto-thai': '🇹🇭',
-  'lotto-international': '🌍',
+  'lotto-foreign': '🌍',
   'lotto-stock': '📈',
   'lotto-daily': '🕘',
 }
@@ -216,7 +226,7 @@ export default function LotteryApp({ initialData, initialDate, initialLang }: {
     const ctrl = new AbortController(); abortRef.current = ctrl
     setLoading(true)
     try {
-      const res = await fetch(`/api/lottery?date=${d}&lang=${l}`, { signal: ctrl.signal })
+      const res = await fetch(`/api/lottery?date=${d}&lang=${l}`, { signal: ctrl.signal, cache: 'no-store' })
       const json: ApiResponse = await res.json()
       if (abortRef.current === ctrl) setData(json)
     } catch (e: unknown) {
@@ -242,7 +252,7 @@ export default function LotteryApp({ initialData, initialDate, initialLang }: {
     detailAbortRef.current?.abort()
     const ctrl = new AbortController(); detailAbortRef.current = ctrl
     setDetailLoading(true)
-    fetch(`/api/market/${market.market_id}?lang=${lang}`, { signal: ctrl.signal })
+    fetch(`/api/market/${market.market_id}?lang=${lang}`, { signal: ctrl.signal, cache: 'no-store' })
       .then(r => r.json())
       .then((j: MarketDetailResponse) => {
         if (detailAbortRef.current === ctrl) setDetail(j)
@@ -543,9 +553,9 @@ export default function LotteryApp({ initialData, initialDate, initialLang }: {
                 </span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
-                {g.markets.map((mk, idx) => (
-                  <MarketCard key={mk.market_id} market={mk} accentColor={m.color} index={idx} t={t} lang={lang} onClick={() => openMarket(mk)} />
-                ))}
+                {(() => { const palette = paletteFor(g.group_code); return g.markets.map((mk, idx) => (
+                  <MarketCard key={mk.market_id} market={mk} accentColor={m.color} accentHighlight={palette[idx % palette.length]} index={idx} t={t} lang={lang} onClick={() => openMarket(mk)} />
+                )) })()}
               </div>
             </div>
           )
@@ -555,7 +565,13 @@ export default function LotteryApp({ initialData, initialDate, initialLang }: {
       {selectedMarket && (
         <MarketDetailModal
           market={selectedMarket}
-          accentColor={metaFor(groups.find(g => g.markets.some(mk => mk.market_id === selectedMarket.market_id))?.group_code ?? '').color}
+          {...(() => {
+            const grp = groups.find(g => g.markets.some(mk => mk.market_id === selectedMarket.market_id))
+            const code = grp?.group_code ?? ''
+            const palette = paletteFor(code)
+            const idx = grp?.markets.findIndex(mk => mk.market_id === selectedMarket.market_id) ?? 0
+            return { accentColor: metaFor(code).color, accentHighlight: palette[(idx >= 0 ? idx : 0) % palette.length] }
+          })()}
           detail={detail}
           loading={detailLoading}
           onClose={closeMarket}
@@ -699,7 +715,7 @@ function ResultsSkeleton() {
   )
 }
 
-function MarketCard({ market, accentColor, index, t, lang, onClick }: { market: Market; accentColor: string; index: number; t: Dict; lang: Lang; onClick: () => void }) {
+function MarketCard({ market, accentColor, accentHighlight, index, t, lang, onClick }: { market: Market; accentColor: string; accentHighlight: string; index: number; t: Dict; lang: Lang; onClick: () => void }) {
   const r = market.result
   const rn = r?.result_number
   const noResult = rn?.no_result === true
@@ -802,7 +818,7 @@ function MarketCard({ market, accentColor, index, t, lang, onClick }: { market: 
               }}>{t.firstPrize}</span>
               <span style={{
                 fontFamily: 'Kanit,sans-serif', fontWeight: 700, fontSize: '1.15rem',
-                color: 'var(--text)', letterSpacing: '0.06em',
+                color: accentHighlight, letterSpacing: '0.06em',
               }}>{firstPrize}</span>
             </div>
           )}
@@ -811,9 +827,9 @@ function MarketCard({ market, accentColor, index, t, lang, onClick }: { market: 
             display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
             alignItems: 'stretch', gap: 8,
           }}>
-            <NumberCell label={t.top3} value={top3} accentColor={accentColor} variant="primary" />
-            <NumberCell label={t.top2Short} value={top2} accentColor={accentColor} />
-            <NumberCell label={t.bottom2Short} value={bottom2} accentColor={accentColor} />
+            <NumberCell label={t.top3} value={top3} accentColor={accentColor} accentHighlight={accentHighlight} />
+            <NumberCell label={t.top2Short} value={top2} accentColor={accentColor} accentHighlight={accentHighlight} />
+            <NumberCell label={t.bottom2Short} value={bottom2} accentColor={accentColor} accentHighlight={accentHighlight} />
           </div>
         </div>
       ) : (
@@ -827,15 +843,15 @@ function MarketCard({ market, accentColor, index, t, lang, onClick }: { market: 
   )
 }
 
-function NumberCell({ label, value, accentColor, variant }: {
-  label: string; value: string; accentColor: string; variant?: 'primary'
+function NumberCell({ label, value, accentColor, accentHighlight, variant }: {
+  label: string; value: string; accentColor: string; accentHighlight: string; variant?: 'primary'
 }) {
   const isPrimary = variant === 'primary'
   return (
     <div style={{
       padding: '10px 8px 12px',
-      background: isPrimary ? `${accentColor}10` : 'rgba(255,255,255,0.025)',
-      border: `1px solid ${isPrimary ? accentColor + '30' : 'var(--border)'}`,
+      background: isPrimary ? `${accentColor}1f` : `${accentColor}0c`,
+      border: `1px solid ${isPrimary ? accentColor + '55' : accentColor + '25'}`,
       borderRadius: 10, textAlign: 'center',
       display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
       minHeight: 78,
@@ -850,19 +866,20 @@ function NumberCell({ label, value, accentColor, variant }: {
         fontSize: '1.6rem',
         lineHeight: 1, letterSpacing: '0.05em',
         ...(isPrimary ? {
-          background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
+          background: `linear-gradient(130deg, ${accentHighlight}, ${accentColor})`,
           WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-          filter: `drop-shadow(0 0 8px ${accentColor}30)`,
-        } : { color: 'var(--text)' }),
+          filter: `drop-shadow(0 0 8px ${accentColor}55)`,
+        } : { color: accentHighlight }),
       }}>{value || '—'}</div>
     </div>
   )
 }
 
 /* ─── Market Detail Modal ─── */
-function MarketDetailModal({ market, accentColor, detail, loading, onClose, t, lang }: {
+function MarketDetailModal({ market, accentColor, accentHighlight, detail, loading, onClose, t, lang }: {
   market: Market
   accentColor: string
+  accentHighlight: string
   detail: MarketDetailResponse | null
   loading: boolean
   onClose: () => void
@@ -942,7 +959,7 @@ function MarketDetailModal({ market, accentColor, detail, loading, onClose, t, l
           {!loading && detail?.success && (
             <>
               {/* latest big block */}
-              {latest && <LatestResultBlock result={latest} accentColor={accentColor} t={t} lang={lang} />}
+              {latest && <LatestResultBlock result={latest} accentColor={accentColor} accentHighlight={accentHighlight} t={t} lang={lang} />}
 
               {/* history */}
               <div style={{ marginTop: 24 }}>
@@ -956,7 +973,7 @@ function MarketDetailModal({ market, accentColor, detail, loading, onClose, t, l
                   </span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {history.map(h => <HistoryRow key={h.draw_id} result={h} accentColor={accentColor} t={t} lang={lang} />)}
+                  {history.map(h => <HistoryRow key={h.draw_id} result={h} accentColor={accentColor} accentHighlight={accentHighlight} t={t} lang={lang} />)}
                 </div>
               </div>
             </>
@@ -967,7 +984,7 @@ function MarketDetailModal({ market, accentColor, detail, loading, onClose, t, l
   )
 }
 
-function LatestResultBlock({ result, accentColor, t, lang }: { result: MarketResult; accentColor: string; t: Dict; lang: Lang }) {
+function LatestResultBlock({ result, accentColor, accentHighlight, t, lang }: { result: MarketResult; accentColor: string; accentHighlight: string; t: Dict; lang: Lang }) {
   const rn = result.result_number
   const noResult = rn?.no_result === true
   const top3 = result.result_top_3 || rn?.top_3 || ''
@@ -988,7 +1005,7 @@ function LatestResultBlock({ result, accentColor, t, lang }: { result: MarketRes
         fontFamily: 'Kanit,sans-serif', marginBottom: 4,
       }}>{t.latest}</div>
       <div style={{ fontSize: '0.875rem', color: 'var(--text-2)', marginBottom: 14 }}>
-        {result.draw_date} <span style={{ color: 'var(--text-3)' }}>· {fmtTime(result.result_at, lang)} {t.hourSuffix}</span>
+        📅 {fullDate(result.draw_date, lang)} <span style={{ color: 'var(--text-3)' }}>· {fmtTime(result.result_at, lang)} {t.hourSuffix}</span>
       </div>
 
       {noResult ? (
@@ -1006,7 +1023,7 @@ function LatestResultBlock({ result, accentColor, t, lang }: { result: MarketRes
               <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 4 }}>{t.firstPrize}</div>
               <div style={{
                 fontFamily: 'Kanit,sans-serif', fontWeight: 700, fontSize: '1.6rem',
-                color: 'var(--text)', letterSpacing: '0.05em',
+                color: accentHighlight, letterSpacing: '0.05em',
               }}>{firstPrize}</div>
             </div>
           )}
@@ -1014,11 +1031,8 @@ function LatestResultBlock({ result, accentColor, t, lang }: { result: MarketRes
             <div>
               <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 4 }}>{t.top3}</div>
               <div style={{
-                fontFamily: 'Kanit,sans-serif', fontWeight: 800, fontSize: '2.6rem', lineHeight: 1,
-                background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
-                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-                filter: `drop-shadow(0 0 10px ${accentColor}35)`,
-                letterSpacing: '0.06em',
+                fontFamily: 'Kanit,sans-serif', fontWeight: 700, fontSize: '1.6rem',
+                color: accentHighlight, letterSpacing: '0.05em',
               }}>{top3}</div>
             </div>
           )}
@@ -1027,7 +1041,7 @@ function LatestResultBlock({ result, accentColor, t, lang }: { result: MarketRes
               <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 4 }}>{t.top2}</div>
               <div style={{
                 fontFamily: 'Kanit,sans-serif', fontWeight: 700, fontSize: '1.6rem',
-                color: 'var(--text)', letterSpacing: '0.05em',
+                color: accentHighlight, letterSpacing: '0.05em',
               }}>{top2}</div>
             </div>
           )}
@@ -1036,7 +1050,7 @@ function LatestResultBlock({ result, accentColor, t, lang }: { result: MarketRes
               <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 4 }}>{t.bottom2}</div>
               <div style={{
                 fontFamily: 'Kanit,sans-serif', fontWeight: 700, fontSize: '1.6rem',
-                color: '#c9c4b6', letterSpacing: '0.05em',
+                color: accentHighlight, letterSpacing: '0.05em',
               }}>{bottom2}</div>
             </div>
           )}
@@ -1046,7 +1060,7 @@ function LatestResultBlock({ result, accentColor, t, lang }: { result: MarketRes
   )
 }
 
-function HistoryRow({ result, accentColor, t, lang }: { result: MarketResult; accentColor: string; t: Dict; lang: Lang }) {
+function HistoryRow({ result, accentColor, accentHighlight, t, lang }: { result: MarketResult; accentColor: string; accentHighlight: string; t: Dict; lang: Lang }) {
   const rn = result.result_number
   const noResult = rn?.no_result === true
   const top3 = result.result_top_3 || rn?.top_3 || ''
@@ -1057,47 +1071,47 @@ function HistoryRow({ result, accentColor, t, lang }: { result: MarketResult; ac
     <div style={{
       display: 'grid',
       gridTemplateColumns: '1fr auto auto auto',
-      alignItems: 'center', gap: 14,
-      padding: '10px 14px',
+      alignItems: 'center', gap: 18,
+      padding: '14px 18px',
       background: 'var(--bg-card)',
       border: '1px solid var(--border)',
-      borderRadius: 10,
+      borderRadius: 12,
     }}>
       <div>
-        <div style={{ fontSize: '0.875rem', color: 'var(--text)', fontFamily: 'Sarabun,sans-serif' }}>
-          {result.draw_date}
+        <div style={{ fontSize: '1rem', color: 'var(--text)', fontFamily: 'Sarabun,sans-serif', fontWeight: 500 }}>
+          {fullDate(result.draw_date, lang)}
         </div>
-        <div style={{ fontSize: '0.875rem', color: 'var(--text-3)' }}>
+        <div style={{ fontSize: '0.95rem', color: 'var(--text-3)', marginTop: 2 }}>
           {fmtTime(result.result_at, lang)} {t.hourSuffix}
         </div>
       </div>
       {noResult ? (
         <div style={{
           gridColumn: '2 / -1', textAlign: 'right',
-          color: '#f87171', fontSize: '0.875rem', fontFamily: 'Kanit,sans-serif', fontWeight: 600,
+          color: '#f87171', fontSize: '1rem', fontFamily: 'Kanit,sans-serif', fontWeight: 600,
         }}>{rn?.label ?? t.noResult}</div>
       ) : (
         <>
-          <HistoryCell label={t.top3Short} value={top3} accentColor={accentColor} large />
-          <HistoryCell label={t.top2Short} value={top2} />
-          <HistoryCell label={t.bottom2Short} value={bottom2} />
+          <HistoryCell label={t.top3Short} value={top3} accentColor={accentColor} accentHighlight={accentHighlight} />
+          <HistoryCell label={t.top2Short} value={top2} accentColor={accentColor} accentHighlight={accentHighlight} />
+          <HistoryCell label={t.bottom2Short} value={bottom2} accentColor={accentColor} accentHighlight={accentHighlight} />
         </>
       )}
     </div>
   )
 }
 
-function HistoryCell({ label, value, accentColor, large }: { label: string; value: string; accentColor?: string; large?: boolean }) {
+function HistoryCell({ label, value, accentColor, accentHighlight, large }: { label: string; value: string; accentColor?: string; accentHighlight?: string; large?: boolean }) {
   return (
-    <div style={{ textAlign: 'center', minWidth: 50 }}>
-      <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em' }}>{label}</div>
+    <div style={{ textAlign: 'center', minWidth: 64 }}>
+      <div style={{ fontSize: '0.95rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em' }}>{label}</div>
       <div style={{
         fontFamily: 'Kanit,sans-serif',
-        fontWeight: large ? 800 : 600,
-        fontSize: large ? '1.15rem' : '0.95rem',
-        color: large && accentColor ? '#f5d060' : 'var(--text-2)',
+        fontWeight: 700,
+        fontSize: '1.4rem',
+        color: accentHighlight ?? (large && accentColor ? accentColor : 'var(--text-2)'),
         letterSpacing: '0.05em',
-        marginTop: 1,
+        marginTop: 3,
       }}>{value || '—'}</div>
     </div>
   )

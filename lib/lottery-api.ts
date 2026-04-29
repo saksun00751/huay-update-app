@@ -61,7 +61,7 @@ export async function fetchLotteryByDate(date: string, lang: string = 'th'): Pro
       'User-Agent': 'Mozilla/5.0',
       'X-Language': lang,
     },
-    next: { revalidate: 60 },
+    cache: 'no-store',
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
