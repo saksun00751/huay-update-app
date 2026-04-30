@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { fetchMarketResults } from '@/lib/lottery-api'
 import { isLang } from '@/lib/i18n'
 
 export const dynamic = 'force-dynamic'
@@ -10,22 +11,8 @@ export async function GET(req: Request, ctx: RouteContext<'/api/market/[id]'>) {
   const langParam = searchParams.get('lang')
   const lang = isLang(langParam) ? langParam : 'th'
 
-  const url = `https://api.1168lot.com/api/v1/lotto/markets/${encodeURIComponent(id)}/results`
-
   try {
-    const res = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-        'User-Agent': 'Mozilla/5.0',
-        'X-Language': lang,
-      },
-      cache: 'no-store',
-    })
-    if (!res.ok) {
-      const text = await res.text().catch(() => null)
-      return NextResponse.json({ error: `HTTP ${res.status}`, details: text }, { status: 500 })
-    }
-    return NextResponse.json(await res.json(), {
+    return NextResponse.json(await fetchMarketResults(id, lang), {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     })
   } catch (err) {

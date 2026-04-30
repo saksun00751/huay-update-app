@@ -35,6 +35,17 @@ export interface Group {
   group_name: string
   markets: Market[]
 }
+export interface MarketDetailResponse {
+  success: boolean
+  data?: {
+    market: { id: number; name: string; group_id: number; group_name: string; logo: string; icon: string }
+    latest_result: MarketResult | null
+    history: MarketResult[]
+    pagination?: { page: number; limit: number; count: number; total: number; has_more: boolean }
+  }
+  message?: string
+  error?: string
+}
 export interface LotteryByDateResponse {
   success: boolean
   data?: {
@@ -55,6 +66,20 @@ export function todayBangkok(): string {
 
 export async function fetchLotteryByDate(date: string, lang: string = 'th'): Promise<LotteryByDateResponse> {
   const url = `https://api.1168lot.com/api/v1/lotto/results/by-date?date=${encodeURIComponent(date)}`
+  const res = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'Mozilla/5.0',
+      'X-Language': lang,
+    },
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export async function fetchMarketResults(id: string, lang: string = 'th'): Promise<MarketDetailResponse> {
+  const url = `https://api.1168lot.com/api/v1/lotto/markets/${encodeURIComponent(id)}/results`
   const res = await fetch(url, {
     headers: {
       Accept: 'application/json',

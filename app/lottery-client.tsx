@@ -1,9 +1,12 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import {
   RefreshCw, ChevronLeft, ChevronRight,
-  TrendingUp, Globe, Flag, Clock, LayoutGrid, X,
+  TrendingUp, Globe, Flag, Clock, LayoutGrid,
+  Menu, X, Compass, Sparkles, FileText,
 } from 'lucide-react'
 import { DICT, LANGS, LANG_LABEL, LANG_FLAG, isLang, type Lang, type Dict } from '@/lib/i18n'
 
@@ -55,17 +58,6 @@ interface ApiResponse {
   message?: string
   error?: string
 }
-interface MarketDetailResponse {
-  success: boolean
-  data?: {
-    market: { id: number; name: string; group_id: number; group_name: string; logo: string; icon: string }
-    latest_result: MarketResult | null
-    history: MarketResult[]
-    pagination?: { page: number; limit: number; count: number; total: number; has_more: boolean }
-  }
-  message?: string
-  error?: string
-}
 
 /* ─── Group meta — keyed by group_code ─── */
 const GROUP_META: Record<string, { icon: React.ReactNode; color: string; highlight: string; cls: string }> = {
@@ -76,6 +68,12 @@ const GROUP_META: Record<string, { icon: React.ReactNode; color: string; highlig
 }
 const FALLBACK_META = { icon: <LayoutGrid size={13} />, color: '#d4af37', highlight: '#f5d060', cls: 'gt-thai' }
 const metaFor = (code: string) => GROUP_META[code] ?? FALLBACK_META
+const GROUP_NAV = [
+  { code: 'lotto-thai', label: 'หวยไทย' },
+  { code: 'lotto-foreign', label: 'หวยต่างประเทศ' },
+  { code: 'lotto-stock', label: 'หวยหุ้น' },
+  { code: 'lotto-daily', label: 'หวยรายวัน' },
+]
 
 /* per-group highlight palettes — cycle through these per market card */
 const GROUP_PALETTE: Record<string, string[]> = {
@@ -86,6 +84,7 @@ const GROUP_PALETTE: Record<string, string[]> = {
 }
 const FALLBACK_PALETTE = ['#f5d060']
 const paletteFor = (code: string) => GROUP_PALETTE[code] ?? FALLBACK_PALETTE
+const lotteryDatePath = (date: string, prefix = '') => `${prefix}/lottery/${date}`
 const GROUP_EMOJI: Record<string, string> = {
   'lotto-thai': '🇹🇭',
   'lotto-foreign': '🌍',
@@ -165,13 +164,18 @@ function fmtTime(s: string | null, lang: Lang) {
 }
 
 /* ──────────────────────────────────────────── */
-export default function LotteryApp({ initialData, initialDate, initialLang }: {
+export default function LotteryApp({ initialData, initialDate, initialLang, groupCode, groupName, langPrefix = '', breadcrumbs }: {
   initialData?: ApiResponse | null
   initialDate?: string
   initialLang?: Lang
+  groupCode?: string
+  groupName?: string
+  langPrefix?: string
+  breadcrumbs?: React.ReactNode
 } = {}) {
-  const [today, setToday] = useState(() => initialDate ?? toLocalDateStr(new Date()))
-  const [date, setDate] = useState(today)
+  const [today, setToday] = useState(() => toLocalDateStr(new Date()))
+  const date = initialDate ?? today
+  const pathname = usePathname()
   const [lang, setLang] = useState<Lang>(initialLang ?? 'th')
   const t: Dict = DICT[lang]
 
@@ -205,21 +209,16 @@ export default function LotteryApp({ initialData, initialDate, initialLang }: {
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [])
-  const [activeGroupCode, setActiveGroupCode] = useState<string>('all')
   const [data, setData] = useState<ApiResponse | null>(initialData ?? null)
   const [loading, setLoading] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const skipFirstFetchRef = useRef(!!initialData)
   const [datePickerOpen, setDatePickerOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const [calendarMonth, setCalendarMonth] = useState(() => {
-    const d = new Date(today + 'T12:00:00')
+    const d = new Date((initialDate ?? toLocalDateStr(new Date())) + 'T12:00:00')
     return toLocalDateStr(new Date(d.getFullYear(), d.getMonth(), 1, 12))
   })
-
-  const [selectedMarket, setSelectedMarket] = useState<Market | null>(null)
-  const [detail, setDetail] = useState<MarketDetailResponse | null>(null)
-  const [detailLoading, setDetailLoading] = useState(false)
-  const detailAbortRef = useRef<AbortController | null>(null)
 
   const fetchData = useCallback(async (d: string, l: Lang) => {
     abortRef.current?.abort()
@@ -228,7 +227,15 @@ export default function LotteryApp({ initialData, initialDate, initialLang }: {
     try {
       const res = await fetch(`/api/lottery?date=${d}&lang=${l}`, { signal: ctrl.signal, cache: 'no-store' })
       const json: ApiResponse = await res.json()
-      if (abortRef.current === ctrl) setData(json)
+      if (abortRef.current === ctrl) {
+        setData(groupCode && json.data ? {
+          ...json,
+          data: {
+            ...json.data,
+            groups: json.data.groups.filter(group => group.group_code === groupCode),
+          },
+        } : json)
+      }
     } catch (e: unknown) {
       if (abortRef.current === ctrl && (e as Error).name !== 'AbortError') {
         setData({ success: false, error: t.loadFail })
@@ -239,60 +246,24 @@ export default function LotteryApp({ initialData, initialDate, initialLang }: {
         setLoading(false)
       }
     }
-  }, [t.loadFail])
+  }, [groupCode, t.loadFail])
 
   useEffect(() => {
     if (skipFirstFetchRef.current) { skipFirstFetchRef.current = false; return }
     fetchData(date, lang)
   }, [date, lang, fetchData])
 
-  const openMarket = useCallback((market: Market) => {
-    setSelectedMarket(market)
-    setDetail(null)
-    detailAbortRef.current?.abort()
-    const ctrl = new AbortController(); detailAbortRef.current = ctrl
-    setDetailLoading(true)
-    fetch(`/api/market/${market.market_id}?lang=${lang}`, { signal: ctrl.signal, cache: 'no-store' })
-      .then(r => r.json())
-      .then((j: MarketDetailResponse) => {
-        if (detailAbortRef.current === ctrl) setDetail(j)
-      })
-      .catch((e: unknown) => {
-        if (detailAbortRef.current === ctrl && (e as Error).name !== 'AbortError') {
-          setDetail({ success: false, error: t.loadFail })
-        }
-      })
-      .finally(() => {
-        if (detailAbortRef.current === ctrl) {
-          detailAbortRef.current = null
-          setDetailLoading(false)
-        }
-      })
-  }, [lang, t.loadFail])
-
-  const closeMarket = useCallback(() => {
-    detailAbortRef.current?.abort()
-    setSelectedMarket(null)
-    setDetail(null)
-  }, [])
-
-  useEffect(() => {
-    if (!selectedMarket) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMarket() }
-    document.addEventListener('keydown', onKey)
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = prevOverflow
-    }
-  }, [selectedMarket, closeMarket])
-
   const isToday = date === today
   const groups = data?.data?.groups ?? []
-  const visibleGroups = activeGroupCode === 'all' ? groups : groups.filter(g => g.group_code === activeGroupCode)
-  const totalMarkets = groups.reduce((s, g) => s + g.markets.length, 0)
-  const resultCount = groups.reduce(
+  const activeGroupCode = groupCode ?? pathname.match(/^\/lottery\/group\/([^/]+)/)?.[1] ?? 'all'
+  const allGroupsHref = groupCode
+    ? lotteryDatePath(date, langPrefix)
+    : pathname.startsWith('/lottery/') && !pathname.startsWith('/lottery/group/')
+    ? lotteryDatePath(date, langPrefix)
+    : langPrefix || '/'
+  const visibleGroups = groupCode ? groups.filter(group => group.group_code === groupCode) : groups
+  const totalMarkets = visibleGroups.reduce((s, g) => s + g.markets.length, 0)
+  const resultCount = visibleGroups.reduce(
     (s, g) => s + g.markets.filter(m => m.result?.result_number && !m.result.result_number.no_result).length,
     0,
   )
@@ -328,114 +299,128 @@ export default function LotteryApp({ initialData, initialDate, initialLang }: {
     setDatePickerOpen(false)
   }, [])
 
-  const selectCalendarDate = useCallback((value: string) => {
-    setDate(value)
-    setDatePickerOpen(false)
-  }, [])
-
   const dateDisplay = shortDate(date, lang)
+  const previousDate = addDays(date, -1)
+  const nextDate = addDays(date, 1)
+  const dateHref = (value: string) => groupCode ? `${langPrefix}/lottery/group/${groupCode}/${value}` : lotteryDatePath(value, langPrefix)
 
   return (
     <div style={{ position: 'relative', zIndex: 1, minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
 
       {/* HEADER */}
-      <header style={{
-        position: 'sticky', top: 0, zIndex: 50,
-        background: 'rgba(8,8,16,0.94)', backdropFilter: 'blur(20px)',
-        borderBottom: '1px solid rgba(212,175,55,0.1)',
-      }}>
-        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 16px' }}>
+      <header className="site-header">
+        <div className="site-header-inner">
+          {/* Top tier: brand + utilities */}
           <div className="header-bar">
-
-            <div className="header-brand" style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-              <div style={{
-                width: 44, height: 44, borderRadius: 10, flexShrink: 0,
-                background: 'rgba(212,175,55,0.08)',
-                border: '1px solid rgba(212,175,55,0.18)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                overflow: 'hidden',
-              }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => setMenuOpen(true)}
+                aria-label="เมนู"
+              >
+                <Menu size={16} />
+              </button>
+              <Link href={langPrefix || '/'} className="header-brand" aria-label={t.brand}>
+              <div className="header-logo">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src="/logo.png"
-                  alt="Huay Update"
-                  style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                />
+                <img src="/logo.png" alt="Huay Update" />
               </div>
-              <div>
-                <div className="font-th" style={{ fontSize: '1.05rem', fontWeight: 700, color: '#f5d060', lineHeight: 1.1 }}>{t.brand}</div>
-                <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', lineHeight: 1 }}>
-                  {t.tagline}
-                </div>
+              <div className="header-brand-text">
+                <div className="header-brand-name font-th">{t.brand}</div>
+                <span className="header-brand-tag">{t.tagline}</span>
               </div>
-
+            </Link>
             </div>
 
-            <div className="header-date" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div className="header-lang-desktop">
-                <LangSwitcher lang={lang} onChange={changeLang} />
-              </div>
-              <div className="date-group">
-                <button className="date-nav-btn" onClick={() => setDate(d => addDays(d, -1))}><ChevronLeft size={14} /></button>
-                <div style={{ cursor: 'pointer', position: 'relative', display: 'block' }}>
-                  <button
-                    type="button"
-                    onClick={openCalendar}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 7,
-                      background: 'var(--bg-card)', border: '1px solid var(--border)',
-                      borderRadius: 10, padding: '6px 11px',
-                      cursor: 'pointer',
-                    }}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-                    </svg>
-                    <span style={{ fontSize: '0.875rem', color: 'var(--text-2)', fontFamily: 'Sarabun,sans-serif', userSelect: 'none', whiteSpace: 'nowrap' }}>
-                      {dateDisplay}
-                    </span>
-                  </button>
-                </div>
-                <button className="date-nav-btn" onClick={() => setDate(d => addDays(d, 1))} disabled={isToday}><ChevronRight size={14} /></button>
-              </div>
-
+            <div className="header-actions">
+              <LangSwitcher lang={lang} onChange={changeLang} />
               <button
-                className="refresh-btn"
+                type="button"
+                className="icon-btn"
                 onClick={() => fetchData(date, lang)}
-                style={{
-                  width: 32, height: 32, borderRadius: 8,
-                  background: 'var(--bg-card)', border: '1px solid var(--border)',
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-2)',
-                }}
-              ><RefreshCw size={13} className={loading ? 'spinning' : ''} /></button>
+                aria-label="Refresh"
+              >
+                <RefreshCw size={14} className={loading ? 'spinning' : ''} />
+              </button>
             </div>
           </div>
 
-          {/* group tabs */}
-          <div style={{ display: 'flex', gap: 4, paddingBottom: 8, overflowX: 'auto' }}>
-            <button
-              className={`group-tab gt-thai ${activeGroupCode === 'all' ? 'active' : ''}`}
-              onClick={() => setActiveGroupCode('all')}
-              style={activeGroupCode === 'all' ? { color: '#d4af37' } : {}}
-            >
-              <LayoutGrid size={13} /> {t.all}
-            </button>
-            {groups.map(g => {
-              const m = metaFor(g.group_code)
-              const isActive = activeGroupCode === g.group_code
-              return (
-                <button key={g.group_code}
-                  className={`group-tab ${m.cls} ${isActive ? 'active' : ''}`}
-                  onClick={() => setActiveGroupCode(g.group_code)}
-                  style={isActive ? { color: m.color } : {}}
-                >
-                  <span style={{ color: isActive ? m.color : undefined }}>{m.icon}</span>
-                  {g.group_name}
+          {/* Bottom tier: nav tabs + date picker */}
+          <div className="header-row-2">
+            <div className="group-tab-row">
+              <Link
+                href={allGroupsHref}
+                className={`group-tab gt-thai ${activeGroupCode === 'all' ? 'active' : ''}`}
+                style={activeGroupCode === 'all' ? { color: '#d4af37' } : {}}
+              >
+                <LayoutGrid size={13} /> {t.all}
+              </Link>
+              {GROUP_NAV.map(g => {
+                const m = metaFor(g.code)
+                const isActive = activeGroupCode === g.code
+                return (
+                  <Link key={g.code}
+                    href={`${langPrefix}/lottery/group/${g.code}/${date}`}
+                    className={`group-tab ${m.cls} ${isActive ? 'active' : ''}`}
+                    style={isActive ? { color: m.color } : {}}
+                  >
+                    <span style={{ color: isActive ? m.color : undefined }}>{m.icon}</span>
+                    {g.label}
+                  </Link>
+                )
+              })}
+            </div>
+
+            <div className="date-group">
+              <Link className="date-nav-btn" href={dateHref(previousDate)} aria-label="ดูผลหวยวันก่อนหน้า">
+                <ChevronLeft size={14} />
+              </Link>
+              <button type="button" onClick={openCalendar} className="date-pill">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+                <span>{dateDisplay}</span>
+              </button>
+              {isToday ? (
+                <button className="date-nav-btn" disabled aria-label="ยังไม่มีผลหวยวันถัดไป">
+                  <ChevronRight size={14} />
                 </button>
-              )
-            })}
+              ) : (
+                <Link className="date-nav-btn" href={dateHref(nextDate)} aria-label="ดูผลหวยวันถัดไป">
+                  <ChevronRight size={14} />
+                </Link>
+              )}
+            </div>
           </div>
         </div>
       </header>
+
+      {menuOpen && (
+        <div className="menu-overlay" onClick={() => setMenuOpen(false)}>
+          <aside className="menu-drawer" onClick={e => e.stopPropagation()}>
+            <div className="menu-drawer-head">
+              <span>เมนู</span>
+              <button type="button" className="icon-btn" onClick={() => setMenuOpen(false)} aria-label="ปิด">
+                <X size={16} />
+              </button>
+            </div>
+            <nav className="menu-drawer-list">
+              <Link href={`${langPrefix}/guide`} className="menu-drawer-item" onClick={() => setMenuOpen(false)}>
+                <Compass size={18} /> <span>แนวทาง</span>
+              </Link>
+              <Link href={`${langPrefix}/lucky-numbers`} className="menu-drawer-item" onClick={() => setMenuOpen(false)}>
+                <Sparkles size={18} /> <span>เลขเด็ด</span>
+              </Link>
+              <Link href={`${langPrefix}/articles`} className="menu-drawer-item" onClick={() => setMenuOpen(false)}>
+                <FileText size={18} /> <span>บทความ</span>
+              </Link>
+            </nav>
+          </aside>
+        </div>
+      )}
+
+      {breadcrumbs}
 
       {datePickerOpen && (
         <div className="calendar-overlay" onClick={closeCalendar}>
@@ -462,16 +447,25 @@ export default function LotteryApp({ initialData, initialDate, initialLang }: {
             <div className="calendar-grid">
               {calendar.cells.map((cell, index) => {
                 const disabled = !cell || cell > today
-                return (
+                return disabled ? (
                   <button
                     key={cell ?? `blank-${index}`}
                     type="button"
-                    className={`calendar-day ${cell === date ? 'active' : ''}`}
-                    disabled={disabled}
-                    onClick={() => cell && selectCalendarDate(cell)}
+                    className="calendar-day disabled"
+                    disabled
                   >
                     {cell ? new Date(cell + 'T12:00:00').getDate() : ''}
                   </button>
+                ) : (
+                  <Link
+                    key={cell}
+                    className={`calendar-day ${cell === date ? 'active' : ''}`}
+                    href={dateHref(cell)}
+                    onClick={closeCalendar}
+                    aria-label={`ดูผลหวยวันที่ ${fullDate(cell, lang)}`}
+                  >
+                    {new Date(cell + 'T12:00:00').getDate()}
+                  </Link>
                 )
               })}
             </div>
@@ -484,9 +478,9 @@ export default function LotteryApp({ initialData, initialDate, initialLang }: {
 
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 18, gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <h2 className="font-th" style={{ fontSize: '1.3rem', fontWeight: 700, lineHeight: 1.1 }}>
-              {t.todayResults}
-            </h2>
+            <h1 className="font-th" style={{ fontSize: '1.3rem', fontWeight: 700, lineHeight: 1.1 }}>
+              {t.todayResults} {fullDate(date, lang)}
+            </h1>
             <p style={{ fontSize: '0.875rem', color: 'var(--text-3)', marginTop: 3 }}>📅 {fullDate(date, lang)}</p>
           </div>
           {loading ? (
@@ -518,8 +512,12 @@ export default function LotteryApp({ initialData, initialDate, initialLang }: {
         {!loading && data?.success && visibleGroups.length === 0 && (
           <div style={{ padding: '64px 24px', textAlign: 'center', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 18 }}>
             <div style={{ fontSize: '3rem', marginBottom: 12 }}>🔍</div>
-            <p className="font-th" style={{ fontSize: '1.05rem', color: 'var(--text-2)' }}>{t.notFound}</p>
-            <p style={{ fontSize: '0.875rem', color: 'var(--text-3)', marginTop: 6 }}>{t.tryOther}</p>
+            <p className="font-th" style={{ fontSize: '1.05rem', color: 'var(--text-2)' }}>
+              {groupCode ? `ไม่พบผล${groupName ?? 'หวยกลุ่มนี้'}ในงวดนี้` : t.notFound}
+            </p>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-3)', marginTop: 6 }}>
+              {groupCode ? 'ลองเลือกงวดก่อนหน้า หรือเปลี่ยนวันที่จากปฏิทินด้านบน' : t.tryOther}
+            </p>
           </div>
         )}
 
@@ -554,7 +552,7 @@ export default function LotteryApp({ initialData, initialDate, initialLang }: {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
                 {(() => { const palette = paletteFor(g.group_code); return g.markets.map((mk, idx) => (
-                  <MarketCard key={mk.market_id} market={mk} accentColor={m.color} accentHighlight={palette[idx % palette.length]} index={idx} t={t} lang={lang} onClick={() => openMarket(mk)} />
+                  <MarketCard key={mk.market_id} market={mk} accentColor={m.color} accentHighlight={palette[idx % palette.length]} index={idx} t={t} lang={lang} langPrefix={langPrefix} />
                 )) })()}
               </div>
             </div>
@@ -562,23 +560,6 @@ export default function LotteryApp({ initialData, initialDate, initialLang }: {
         })}
       </div>
 
-      {selectedMarket && (
-        <MarketDetailModal
-          market={selectedMarket}
-          {...(() => {
-            const grp = groups.find(g => g.markets.some(mk => mk.market_id === selectedMarket.market_id))
-            const code = grp?.group_code ?? ''
-            const palette = paletteFor(code)
-            const idx = grp?.markets.findIndex(mk => mk.market_id === selectedMarket.market_id) ?? 0
-            return { accentColor: metaFor(code).color, accentHighlight: palette[(idx >= 0 ? idx : 0) % palette.length] }
-          })()}
-          detail={detail}
-          loading={detailLoading}
-          onClose={closeMarket}
-          t={t}
-          lang={lang}
-        />
-      )}
     </div>
   )
 }
@@ -587,6 +568,20 @@ export default function LotteryApp({ initialData, initialDate, initialLang }: {
 function LangSwitcher({ lang, onChange }: { lang: Lang; onChange: (l: Lang) => void }) {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const pathname = usePathname()
+  const languageHref = useCallback((nextLang: Lang) => {
+    const pathWithoutLang = pathname.replace(/^\/(th|en|la|kh)(?=\/|$)/, '') || '/'
+    const prefix = `/${nextLang}`
+    if (
+      /^\/lottery\/\d{4}-\d{2}-\d{2}$/.test(pathWithoutLang) ||
+      /^\/lottery\/group\/[^/]+(?:\/\d{4}-\d{2}-\d{2})?$/.test(pathWithoutLang) ||
+      /^\/market\/[^/]+$/.test(pathWithoutLang)
+    ) {
+      return `${prefix}${pathWithoutLang}`
+    }
+    if (pathWithoutLang === '/') return prefix
+    return prefix
+  }, [pathname])
 
   useEffect(() => {
     if (!open) return
@@ -634,10 +629,11 @@ function LangSwitcher({ lang, onChange }: { lang: Lang; onChange: (l: Lang) => v
           animation: 'fadeIn 0.12s ease',
         }}>
           {LANGS.map(l => (
-            <button
+            <Link
               key={l}
               role="option"
               aria-selected={l === lang}
+              href={languageHref(l)}
               onClick={() => { onChange(l); setOpen(false) }}
               style={{
                 width: '100%', display: 'flex', alignItems: 'center', gap: 10,
@@ -648,6 +644,7 @@ function LangSwitcher({ lang, onChange }: { lang: Lang; onChange: (l: Lang) => v
                 cursor: 'pointer',
                 fontSize: '0.95rem', fontWeight: 600,
                 fontFamily: 'Sarabun,sans-serif',
+                textDecoration: 'none',
               }}
               onMouseEnter={e => { if (l !== lang) e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
               onMouseLeave={e => { if (l !== lang) e.currentTarget.style.background = 'transparent' }}
@@ -659,7 +656,7 @@ function LangSwitcher({ lang, onChange }: { lang: Lang; onChange: (l: Lang) => v
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               )}
-            </button>
+            </Link>
           ))}
         </div>
       )}
@@ -715,7 +712,7 @@ function ResultsSkeleton() {
   )
 }
 
-function MarketCard({ market, accentColor, accentHighlight, index, t, lang, onClick }: { market: Market; accentColor: string; accentHighlight: string; index: number; t: Dict; lang: Lang; onClick: () => void }) {
+function MarketCard({ market, accentColor, accentHighlight, index, t, lang, langPrefix }: { market: Market; accentColor: string; accentHighlight: string; index: number; t: Dict; lang: Lang; langPrefix: string }) {
   const r = market.result
   const rn = r?.result_number
   const noResult = rn?.no_result === true
@@ -752,9 +749,8 @@ function MarketCard({ market, accentColor, accentHighlight, index, t, lang, onCl
         el.style.borderColor = hasResult ? accentColor + '25' : 'var(--border)'
       }}
     >
-      <button
-        type="button"
-        onClick={onClick}
+      <Link
+        href={`${langPrefix}/market/${market.market_id}`}
         style={{
           position: 'absolute', top: 10, right: 10, zIndex: 2,
           width: 30, height: 30, borderRadius: 8,
@@ -765,13 +761,13 @@ function MarketCard({ market, accentColor, accentHighlight, index, t, lang, onCl
           color: accentColor,
           cursor: 'pointer',
           fontSize: '1rem',
+          textDecoration: 'none',
         }}
         aria-label={`ดูผลย้อนหลัง ${market.market_name}`}
         title="ดูผลย้อนหลัง"
       >
         🕘
-      </button>
-
+      </Link>
       {/* header: logo + name + time */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, paddingRight: 38 }}>
         {market.market_logo && (
@@ -783,7 +779,7 @@ function MarketCard({ market, accentColor, accentHighlight, index, t, lang, onCl
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="font-th" style={{
-            fontSize: '0.95rem', fontWeight: 600, color: 'var(--text)', lineHeight: 1.2,
+            fontSize: '1.15rem', fontWeight: 700, color: 'var(--text)', lineHeight: 1.2,
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>{market.market_name}</div>
           {r?.result_at && (
@@ -872,264 +868,6 @@ function NumberCell({ label, value, accentColor, accentHighlight, variant }: {
         background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
         WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
         // filter removed,
-      }}>{value || '—'}</div>
-    </div>
-  )
-}
-
-/* ─── Market Detail Modal ─── */
-function MarketDetailModal({ market, accentColor, accentHighlight, detail, loading, onClose, t, lang }: {
-  market: Market
-  accentColor: string
-  accentHighlight: string
-  detail: MarketDetailResponse | null
-  loading: boolean
-  onClose: () => void
-  t: Dict
-  lang: Lang
-}) {
-  const m = detail?.data?.market
-  const latest = detail?.data?.latest_result
-  const history = detail?.data?.history ?? []
-
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 100,
-        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-        padding: '40px 16px', overflowY: 'auto',
-        animation: 'fadeIn 0.18s ease',
-      }}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          width: '100%', maxWidth: 720,
-          background: `linear-gradient(180deg, ${accentColor}0a 0%, var(--bg) 60%)`,
-          border: `1px solid ${accentColor}30`,
-          borderRadius: 18, overflow: 'hidden',
-          boxShadow: `0 20px 60px ${accentColor}25`,
-        }}
-      >
-        {/* header */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px',
-          borderBottom: '1px solid var(--border)',
-          background: 'rgba(8,8,16,0.6)',
-        }}>
-          {market.market_logo && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={market.market_logo} alt="" style={{
-              width: 44, height: 44, borderRadius: 10, objectFit: 'cover',
-              border: '1px solid var(--border)',
-            }} />
-          )}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <h2 className="font-th" style={{
-              fontSize: '1.1rem', fontWeight: 700, color: 'var(--text)', lineHeight: 1.2,
-            }}>{m?.name ?? market.market_name}</h2>
-            <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', marginTop: 2 }}>
-              {m?.group_name ?? ''}
-            </div>
-          </div>
-          <button onClick={onClose} style={{
-            width: 32, height: 32, borderRadius: 8,
-            border: '1px solid var(--border)', background: 'var(--bg-card)',
-            color: 'var(--text-2)', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}><X size={14} /></button>
-        </div>
-
-        {/* body */}
-        <div style={{ padding: 20 }}>
-          {loading && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div className="skeleton" style={{ height: 140 }} />
-              <div className="skeleton" style={{ height: 24, width: 120 }} />
-              {Array(5).fill(0).map((_, i) => <div key={i} className="skeleton" style={{ height: 56 }} />)}
-            </div>
-          )}
-
-          {!loading && detail && !detail.success && (
-            <div style={{ padding: '24px', textAlign: 'center', color: '#f87171' }}>
-              ⚠️ {detail.error ?? detail.message ?? t.loadFail}
-            </div>
-          )}
-
-          {!loading && detail?.success && (
-            <>
-              {/* latest big block */}
-              {latest && <LatestResultBlock result={latest} accentColor={accentColor} accentHighlight={accentHighlight} t={t} lang={lang} />}
-
-              {/* history */}
-              <div style={{ marginTop: 24 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-                  <h3 className="font-th" style={{ fontSize: '0.875rem', fontWeight: 600, color: accentColor }}>
-                    {t.history}
-                  </h3>
-                  <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${accentColor}30, transparent)` }} />
-                  <span style={{ fontSize: '0.875rem', color: 'var(--text-3)' }}>
-                    {history.length} {t.draws}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {history.map(h => <HistoryRow key={h.draw_id} result={h} accentColor={accentColor} accentHighlight={accentHighlight} t={t} lang={lang} />)}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function LatestResultBlock({ result, accentColor, accentHighlight, t, lang }: { result: MarketResult; accentColor: string; accentHighlight: string; t: Dict; lang: Lang }) {
-  const rn = result.result_number
-  const noResult = rn?.no_result === true
-  const top3 = result.result_top_3 || rn?.top_3 || ''
-  const top2 = result.result_top_2 || rn?.top_2 || ''
-  const bottom2 = result.result_bottom_2 || rn?.bottom_2 || ''
-  const firstPrize = result.first_prize || rn?.first_prize || ''
-
-  return (
-    <div style={{
-      padding: '20px 18px',
-      background: `linear-gradient(135deg, ${accentColor}10 0%, rgba(8,8,16,0.5) 70%)`,
-      border: `1px solid ${accentColor}25`,
-      borderRadius: 14,
-    }}>
-      <div style={{
-        fontSize: '0.875rem', fontWeight: 700, color: accentColor, opacity: 0.8,
-        letterSpacing: '0.1em', textTransform: 'uppercase',
-        fontFamily: 'Kanit,sans-serif', marginBottom: 4,
-      }}>{t.latest}</div>
-      <div style={{ fontSize: '0.875rem', color: 'var(--text-2)', marginBottom: 14 }}>
-        📅 {fullDate(result.draw_date, lang)} <span style={{ color: 'var(--text-3)' }}>· {fmtTime(result.result_at, lang)} {t.hourSuffix}</span>
-      </div>
-
-      {noResult ? (
-        <div style={{
-          padding: '20px', textAlign: 'center',
-          color: '#f87171', fontSize: '1rem', fontFamily: 'Kanit,sans-serif', fontWeight: 600,
-          background: 'rgba(239,68,68,0.06)', borderRadius: 10,
-        }}>
-          {rn?.label ?? t.noResult}
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-end' }}>
-          {firstPrize && firstPrize.length > 3 && (
-            <div>
-              <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 4 }}>{t.firstPrize}</div>
-              <div style={{
-                fontFamily: 'Kanit,sans-serif', fontWeight: 700, fontSize: '1.6rem',
-                letterSpacing: '0.05em',
-                background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
-                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-                // filter removed,
-              }}>{firstPrize}</div>
-            </div>
-          )}
-          {top3 && (
-            <div>
-              <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 4 }}>{t.top3}</div>
-              <div style={{
-                fontFamily: 'Kanit,sans-serif', fontWeight: 700, fontSize: '1.6rem',
-                letterSpacing: '0.05em',
-                background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
-                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-                // filter removed,
-              }}>{top3}</div>
-            </div>
-          )}
-          {top2 && (
-            <div>
-              <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 4 }}>{t.top2}</div>
-              <div style={{
-                fontFamily: 'Kanit,sans-serif', fontWeight: 700, fontSize: '1.6rem',
-                letterSpacing: '0.05em',
-                background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
-                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-                // filter removed,
-              }}>{top2}</div>
-            </div>
-          )}
-          {bottom2 && (
-            <div>
-              <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 4 }}>{t.bottom2}</div>
-              <div style={{
-                fontFamily: 'Kanit,sans-serif', fontWeight: 700, fontSize: '1.6rem',
-                letterSpacing: '0.05em',
-                background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
-                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-                // filter removed,
-              }}>{bottom2}</div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function HistoryRow({ result, accentColor, accentHighlight, t, lang }: { result: MarketResult; accentColor: string; accentHighlight: string; t: Dict; lang: Lang }) {
-  const rn = result.result_number
-  const noResult = rn?.no_result === true
-  const top3 = result.result_top_3 || rn?.top_3 || ''
-  const top2 = result.result_top_2 || rn?.top_2 || ''
-  const bottom2 = result.result_bottom_2 || rn?.bottom_2 || ''
-
-  return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: '1fr auto auto auto',
-      alignItems: 'center', gap: 18,
-      padding: '14px 18px',
-      background: 'var(--bg-card)',
-      border: '1px solid var(--border)',
-      borderRadius: 12,
-    }}>
-      <div>
-        <div style={{ fontSize: '1rem', color: 'var(--text)', fontFamily: 'Sarabun,sans-serif', fontWeight: 500 }}>
-          {fullDate(result.draw_date, lang)}
-        </div>
-        <div style={{ fontSize: '0.95rem', color: 'var(--text-3)', marginTop: 2 }}>
-          {fmtTime(result.result_at, lang)} {t.hourSuffix}
-        </div>
-      </div>
-      {noResult ? (
-        <div style={{
-          gridColumn: '2 / -1', textAlign: 'right',
-          color: '#f87171', fontSize: '1rem', fontFamily: 'Kanit,sans-serif', fontWeight: 600,
-        }}>{rn?.label ?? t.noResult}</div>
-      ) : (
-        <>
-          <HistoryCell label={t.top3Short} value={top3} accentColor={accentColor} accentHighlight={accentHighlight} />
-          <HistoryCell label={t.top2Short} value={top2} accentColor={accentColor} accentHighlight={accentHighlight} />
-          <HistoryCell label={t.bottom2Short} value={bottom2} accentColor={accentColor} accentHighlight={accentHighlight} />
-        </>
-      )}
-    </div>
-  )
-}
-
-function HistoryCell({ label, value, accentColor, accentHighlight, large }: { label: string; value: string; accentColor?: string; accentHighlight?: string; large?: boolean }) {
-  return (
-    <div style={{ textAlign: 'center', minWidth: 64 }}>
-      <div style={{ fontSize: '0.95rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em' }}>{label}</div>
-      <div style={{
-        fontFamily: 'Kanit,sans-serif',
-        fontWeight: 700,
-        fontSize: '1.4rem',
-        letterSpacing: '0.05em',
-        marginTop: 3,
-        ...(accentColor ? {
-          background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
-          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-          // filter removed,
-        } : { color: accentHighlight ?? 'var(--text-2)' }),
       }}>{value || '—'}</div>
     </div>
   )
