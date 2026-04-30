@@ -818,7 +818,10 @@ function MarketCard({ market, accentColor, accentHighlight, index, t, lang, onCl
               }}>{t.firstPrize}</span>
               <span style={{
                 fontFamily: 'Kanit,sans-serif', fontWeight: 700, fontSize: '1.15rem',
-                color: accentHighlight, letterSpacing: '0.06em',
+                letterSpacing: '0.06em',
+                background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+                // filter removed,
               }}>{firstPrize}</span>
             </div>
           )}
@@ -852,7 +855,8 @@ function NumberCell({ label, value, accentColor, accentHighlight, variant }: {
       padding: '10px 8px 12px',
       background: isPrimary ? `${accentColor}1f` : `${accentColor}0c`,
       border: `1px solid ${isPrimary ? accentColor + '55' : accentColor + '25'}`,
-      borderRadius: 10, textAlign: 'center',
+      borderRadius: 10,
+      textAlign: 'center',
       display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
       minHeight: 78,
     }}>
@@ -865,11 +869,9 @@ function NumberCell({ label, value, accentColor, accentHighlight, variant }: {
         fontWeight: 800,
         fontSize: '1.6rem',
         lineHeight: 1, letterSpacing: '0.05em',
-        ...(isPrimary ? {
-          background: `linear-gradient(130deg, ${accentHighlight}, ${accentColor})`,
-          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-          filter: `drop-shadow(0 0 8px ${accentColor}55)`,
-        } : { color: accentHighlight }),
+        background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
+        WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+        // filter removed,
       }}>{value || '—'}</div>
     </div>
   )
@@ -1023,7 +1025,10 @@ function LatestResultBlock({ result, accentColor, accentHighlight, t, lang }: { 
               <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 4 }}>{t.firstPrize}</div>
               <div style={{
                 fontFamily: 'Kanit,sans-serif', fontWeight: 700, fontSize: '1.6rem',
-                color: accentHighlight, letterSpacing: '0.05em',
+                letterSpacing: '0.05em',
+                background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+                // filter removed,
               }}>{firstPrize}</div>
             </div>
           )}
@@ -1032,7 +1037,10 @@ function LatestResultBlock({ result, accentColor, accentHighlight, t, lang }: { 
               <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 4 }}>{t.top3}</div>
               <div style={{
                 fontFamily: 'Kanit,sans-serif', fontWeight: 700, fontSize: '1.6rem',
-                color: accentHighlight, letterSpacing: '0.05em',
+                letterSpacing: '0.05em',
+                background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+                // filter removed,
               }}>{top3}</div>
             </div>
           )}
@@ -1041,7 +1049,10 @@ function LatestResultBlock({ result, accentColor, accentHighlight, t, lang }: { 
               <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 4 }}>{t.top2}</div>
               <div style={{
                 fontFamily: 'Kanit,sans-serif', fontWeight: 700, fontSize: '1.6rem',
-                color: accentHighlight, letterSpacing: '0.05em',
+                letterSpacing: '0.05em',
+                background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+                // filter removed,
               }}>{top2}</div>
             </div>
           )}
@@ -1050,7 +1061,10 @@ function LatestResultBlock({ result, accentColor, accentHighlight, t, lang }: { 
               <div style={{ fontSize: '0.875rem', color: 'var(--text-3)', fontFamily: 'Kanit,sans-serif', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 4 }}>{t.bottom2}</div>
               <div style={{
                 fontFamily: 'Kanit,sans-serif', fontWeight: 700, fontSize: '1.6rem',
-                color: accentHighlight, letterSpacing: '0.05em',
+                letterSpacing: '0.05em',
+                background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+                // filter removed,
               }}>{bottom2}</div>
             </div>
           )}
@@ -1109,9 +1123,13 @@ function HistoryCell({ label, value, accentColor, accentHighlight, large }: { la
         fontFamily: 'Kanit,sans-serif',
         fontWeight: 700,
         fontSize: '1.4rem',
-        color: accentHighlight ?? (large && accentColor ? accentColor : 'var(--text-2)'),
         letterSpacing: '0.05em',
         marginTop: 3,
+        ...(accentColor ? {
+          background: `linear-gradient(130deg, #f5d060, ${accentColor})`,
+          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+          // filter removed,
+        } : { color: accentHighlight ?? 'var(--text-2)' }),
       }}>{value || '—'}</div>
     </div>
   )
